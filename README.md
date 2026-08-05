@@ -39,7 +39,8 @@ The plugin adds those automatically.
   - `File 0`
   - `File 1`
   - `File 2`
-- `File 0`, `File 1`, and `File 2` can be:
+  - `File 3`
+- `File 0`, `File 1`, `File 2`, and `File 3` can be:
   - image files
   - basic standalone `.glsl` shader buffers
 - Internal render resolution override:
@@ -48,6 +49,8 @@ The plugin adds those automatically.
 - Mouse position controlled by parameters
 - Time speed control
 - Optional input video vertical flip
+- Shader alpha control (force opaque or keep shader alpha)
+- 8 custom animated float parameters (`iParam0`–`iParam7`)
 - Default animated color shader when no shader file is selected
 - Shader compile/link errors are printed to the terminal and fall back to the
   default color shader
@@ -171,22 +174,25 @@ again after updating the plugin/XML.
 
 ## Parameters
 
-| Parameter | Type | Description |
-|---|---:|---|
-| `Script File` | file path | Main `.glsl` / `.frag` shader file |
-| `Speed` | animated float | Time multiplier. Negative values reverse time |
-| `Flip Video Y` | bool | Flip the input video texture vertically |
-| `iChannel0` | list | Source for `iChannel0` |
-| `iChannel1` | list | Source for `iChannel1` |
-| `iChannel2` | list | Source for `iChannel2` |
-| `iChannel3` | list | Source for `iChannel3` |
-| `File 0` | file path | Image file or basic shader buffer |
-| `File 1` | file path | Image file or basic shader buffer |
-| `File 2` | file path | Image file or basic shader buffer |
-| `Mouse X` | animated float | Normalized mouse X, `0.0` to `1.0` |
-| `Mouse Y` | animated float | Normalized mouse Y, `0.0` to `1.0` |
-| `Render Width` | int | Internal shader render width. `0` = automatic |
-| `Render Height` | int | Internal shader render height. `0` = automatic |
+| # | Parameter | Type | Description |
+|---|---|---:|---|
+| 0 | `Script File` | file path | Main `.glsl` / `.frag` shader file |
+| 1 | `Speed` | animated float | Time multiplier. Negative values reverse time |
+| 2 | `Flip Video Y` | bool | Flip the input video texture vertically |
+| 3 | `Use Shader Alpha` | bool | Off = force alpha to 1.0 (opaque). On = keep shader alpha |
+| 4 | `iChannel0` | list | Source for `iChannel0` |
+| 5 | `iChannel1` | list | Source for `iChannel1` |
+| 6 | `iChannel2` | list | Source for `iChannel2` |
+| 7 | `iChannel3` | list | Source for `iChannel3` |
+| 8 | `File 0` | file path | Image file or basic shader buffer |
+| 9 | `File 1` | file path | Image file or basic shader buffer |
+| 10 | `File 2` | file path | Image file or basic shader buffer |
+| 11 | `File 3` | file path | Image file or basic shader buffer |
+| 12 | `Mouse X` | animated float | Normalized mouse X, `0.0` to `1.0` |
+| 13 | `Mouse Y` | animated float | Normalized mouse Y, `0.0` to `1.0` |
+| 14 | `Render Width` | int | Internal shader render width. `0` = automatic |
+| 15 | `Render Height` | int | Internal shader render height. `0` = automatic |
+| 16–23 | `iParam0`–`iParam7` | animated float | Custom shader uniforms, keyframable |
 
 ### Notes
 
@@ -249,6 +255,17 @@ precision highp float;
 
 Desktop OpenGL 3.3 core does not use those.
 
+You can also use the custom uniforms `iParam0`–`iParam7` in your shader:
+
+```glsl
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    vec2 uv = fragCoord / iResolution.xy;
+    float param = iParam0; // animated parameter 0
+    fragColor = vec4(uv.x, uv.y, 0.5 + 0.5 * sin(iTime + param), 1.0);
+}
+```
+
 ---
 
 ## Default shader
@@ -270,7 +287,7 @@ If you want any other default shader instead, change `kDefaultShader` in the C++
 
 ## Using image files
 
-`File 0`, `File 1`, and `File 2` support common image formats through
+`File 0`, `File 1`, `File 2`, and `File 3` support common image formats through
 `stb_image`, for example:
 
 ```txt
@@ -305,7 +322,7 @@ normal Shadertoy-style UV coordinates.
 
 ## Using basic shader buffer files
 
-`File 0`, `File 1`, and `File 2` can also be standalone shader scripts.
+`File 0`, `File 1`, `File 2`, and `File 3` can also be standalone shader scripts.
 
 Supported shader extensions:
 
@@ -367,6 +384,7 @@ Important:
   - `iTimeDelta`
   - `iFrame`
   - `iMouse`
+  - `iParam0`–`iParam7`
 - Buffer scripts do **not** receive real iChannels.
 - Inside buffer scripts, `iChannel0..3` are bound to black.
 - Buffer scripts cannot read previous frames.
@@ -514,17 +532,27 @@ Current parameter layout:
 0  Script File
 1  Speed
 2  Flip Video Y
-3  iChannel0
-4  iChannel1
-5  iChannel2
-6  iChannel3
-7  File 0
-8  File 1
-9  File 2
-10 Mouse X
-11 Mouse Y
-12 Render Width
-13 Render Height
+3  Use Shader Alpha
+4  iChannel0
+5  iChannel1
+6  iChannel2
+7  iChannel3
+8  File 0
+9  File 1
+10 File 2
+11 File 3
+12 Mouse X
+13 Mouse Y
+14 Render Width
+15 Render Height
+16 iParam0
+17 iParam1
+18 iParam2
+19 iParam3
+20 iParam4
+21 iParam5
+22 iParam6
+23 iParam7
 ```
 
 ---
@@ -596,7 +624,7 @@ Check that:
 
 - the file path is correct
 - the file is a supported image format
-- the matching iChannel is set to `File 0`, `File 1`, or `File 2`
+- the matching iChannel is set to `File 0`, `File 1`, `File 2`, or `File 3`
 
 Example:
 
@@ -667,3 +695,7 @@ stb_image.h      image loading library
 README.md        this file
 examples/        example shaders
 ```
+
+## License
+
+See the LICENSE file.
