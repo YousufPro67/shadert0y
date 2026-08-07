@@ -1,8 +1,4 @@
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <GL/gl.h>
-#include <GL/glext.h>
-#include <dlfcn.h>
+#include "platform_gl.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -21,71 +17,9 @@
 #include "stb_image.h"
 
 extern "C" {
-#include <frei0r.h>
+#include "frei0r.h"
 }
 
-// ---------------------------------------------------------------------------
-// Minimal GL function-pointer loader
-// ---------------------------------------------------------------------------
-namespace gl {
-
-#define GL_FUNC_LIST \
-    X(PFNGLCREATESHADERPROC,          glCreateShader) \
-    X(PFNGLSHADERSOURCEPROC,          glShaderSource) \
-    X(PFNGLCOMPILESHADERPROC,         glCompileShader) \
-    X(PFNGLGETSHADERIVPROC,           glGetShaderiv) \
-    X(PFNGLGETSHADERINFOLOGPROC,      glGetShaderInfoLog) \
-    X(PFNGLCREATEPROGRAMPROC,         glCreateProgram) \
-    X(PFNGLATTACHSHADERPROC,          glAttachShader) \
-    X(PFNGLLINKPROGRAMPROC,           glLinkProgram) \
-    X(PFNGLGETPROGRAMIVPROC,          glGetProgramiv) \
-    X(PFNGLGETPROGRAMINFOLOGPROC,     glGetProgramInfoLog) \
-    X(PFNGLUSEPROGRAMPROC,            glUseProgram) \
-    X(PFNGLDELETESHADERPROC,          glDeleteShader) \
-    X(PFNGLDELETEPROGRAMPROC,         glDeleteProgram) \
-    X(PFNGLGENFRAMEBUFFERSPROC,       glGenFramebuffers) \
-    X(PFNGLBINDFRAMEBUFFERPROC,       glBindFramebuffer) \
-    X(PFNGLFRAMEBUFFERTEXTURE2DPROC,  glFramebufferTexture2D) \
-    X(PFNGLCHECKFRAMEBUFFERSTATUSPROC,glCheckFramebufferStatus) \
-    X(PFNGLDELETEFRAMEBUFFERSPROC,    glDeleteFramebuffers) \
-    X(PFNGLGENVERTEXARRAYSPROC,       glGenVertexArrays) \
-    X(PFNGLBINDVERTEXARRAYPROC,       glBindVertexArray) \
-    X(PFNGLDELETEVERTEXARRAYSPROC,    glDeleteVertexArrays) \
-    X(PFNGLGETUNIFORMLOCATIONPROC,    glGetUniformLocation) \
-    X(PFNGLUNIFORM1FPROC,             glUniform1f) \
-    X(PFNGLUNIFORM1IPROC,             glUniform1i) \
-    X(PFNGLUNIFORM3FPROC,             glUniform3f) \
-    X(PFNGLUNIFORM4FPROC,             glUniform4f) \
-    X(PFNGLUNIFORM1FVPROC,            glUniform1fv) \
-    X(PFNGLUNIFORM3FVPROC,            glUniform3fv) \
-    X(PFNGLACTIVETEXTUREPROC,         glActiveTexture) \
-    X(PFNGLBLITFRAMEBUFFERPROC,       glBlitFramebuffer)
-
-#define X(type, name) type name = nullptr;
-GL_FUNC_LIST
-#undef X
-
-static void* loadProc(const char* name) {
-    void* p = (void*)eglGetProcAddress(name);
-    if (!p) p = dlsym(RTLD_DEFAULT, name);
-    return p;
-}
-
-static bool loadAll() {
-#define X(type, name) \
-    name = (type)loadProc(#name); \
-    if (!name) { \
-        fprintf(stderr, "[shadert0y] missing GL function: %s\n", #name); \
-        return false; \
-    }
-    GL_FUNC_LIST
-#undef X
-    return true;
-}
-
-} // namespace gl
-
-// ---------------------------------------------------------------------------
 // Default tiny shader
 // ---------------------------------------------------------------------------
 static const char* kDefaultShader = R"GLSL(
@@ -343,9 +277,7 @@ struct ShaderInstance {
     unsigned int width = 0;
     unsigned int height = 0;
 
-    EGLDisplay display = EGL_NO_DISPLAY;
-    EGLContext context = EGL_NO_CONTEXT;
-    EGLSurface surface = EGL_NO_SURFACE;
+    PlatformGL pg;
 
     GLuint sharedVS = 0;
     GLuint vao      = 0;
@@ -386,11 +318,9 @@ struct ShaderInstance {
 
     double userParams[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
-    bool ok() const {
-        return display != EGL_NO_DISPLAY && surface != EGL_NO_SURFACE;
-    }
+    bool ok() const { return pg.valid; }
 
-    bool initEGL();
+    bool initGL();
     void destroy();
 
     void render(const uint32_t* inframe, uint32_t* outframe, double time);
@@ -568,38 +498,8 @@ void ShaderInstance::renderFileShader(int idx, float iTime, float iTimeDelta, fl
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
-bool ShaderInstance::initEGL() {
-    display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (display == EGL_NO_DISPLAY) return false;
-
-    EGLint major, minor;
-    if (!eglInitialize(display, &major, &minor)) return false;
-    if (!eglBindAPI(EGL_OPENGL_API)) return false;
-
-    const EGLint configAttribs[] = {
-        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE
-    };
-    EGLConfig config;
-    EGLint numConfigs = 0;
-    if (!eglChooseConfig(display, configAttribs, &config, 1, &numConfigs) || numConfigs < 1) return false;
-
-    const EGLint pbufAttribs[] = { EGL_WIDTH, (EGLint)width, EGL_HEIGHT, (EGLint)height, EGL_NONE };
-    surface = eglCreatePbufferSurface(display, config, pbufAttribs);
-    if (surface == EGL_NO_SURFACE) return false;
-
-    const EGLint ctxAttribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 3,
-        EGL_CONTEXT_MINOR_VERSION, 3,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_NONE
-    };
-    context = eglCreateContext(display, config, EGL_NO_CONTEXT, ctxAttribs);
-    if (context == EGL_NO_CONTEXT) return false;
-
-    if (!eglMakeCurrent(display, surface, surface, context)) return false;
+bool ShaderInstance::initGL() {
+    if (!platformInit(pg, (int)width, (int)height)) return false;
     if (!gl::loadAll()) return false;
 
     std::string vlog;
@@ -642,16 +542,19 @@ bool ShaderInstance::initEGL() {
 }
 
 void ShaderInstance::destroy() {
-    if (display != EGL_NO_DISPLAY) {
-        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (pg.valid) {
+        platformMakeCurrent(pg);
 
         if (passMain.program) gl::glDeleteProgram(passMain.program);
         if (sharedVS) gl::glDeleteShader(sharedVS);
         if (vao) gl::glDeleteVertexArrays(1, &vao);
+
         if (outFbo) gl::glDeleteFramebuffers(1, &outFbo);
         if (outTex) glDeleteTextures(1, &outTex);
+
         if (sceneFbo) gl::glDeleteFramebuffers(1, &sceneFbo);
         if (sceneTex) glDeleteTextures(1, &sceneTex);
+
         if (inputTex) glDeleteTextures(1, &inputTex);
         if (blackTex) glDeleteTextures(1, &blackTex);
 
@@ -661,19 +564,23 @@ void ShaderInstance::destroy() {
             if (files[i].tex) glDeleteTextures(1, &files[i].tex);
         }
 
-        if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
-        if (surface != EGL_NO_SURFACE) eglDestroySurface(display, surface);
-        eglTerminate(display);
+        passMain.program = 0;
+
+        platformShutdown(pg);
     }
 
-    display = EGL_NO_DISPLAY;
-    context = EGL_NO_CONTEXT;
-    surface = EGL_NO_SURFACE;
-    vao = outFbo = outTex = sceneFbo = sceneTex = inputTex = blackTex = sharedVS = 0;
+    vao = 0;
+    outFbo = 0;
+    outTex = 0;
+    sceneFbo = 0;
+    sceneTex = 0;
+    inputTex = 0;
+    blackTex = 0;
+    sharedVS = 0;
 }
 
 void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double time) {
-    if (!eglMakeCurrent(display, surface, surface, context)) return;
+   if (!platformMakeCurrent(pg)) return;
 
     // Render Width  -> horizontal (X) resolution.
     // Render Height -> vertical   (Y) resolution.
@@ -857,7 +764,7 @@ f0r_instance_t f0r_construct(unsigned int width, unsigned int height) {
     ShaderInstance* inst = new ShaderInstance();
     inst->width = width;
     inst->height = height;
-    inst->initEGL();
+    inst->initGL();
     return (f0r_instance_t)inst;
 }
 
