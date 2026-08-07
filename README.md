@@ -80,8 +80,13 @@ plugin would need to be rewritten as a mixer/transition-style plugin, not a
 normal filter.
 
 ---
+## Build Manually
 
-## Dependencies
+It is not recommended to build manually unless the installers don't work or you are on ARM. Get pre-built packages from [Releases](https://github.com/YousufPro67/shadert0y/releases).
+
+## On Linux
+
+### Dependencies
 
 Debian/Ubuntu:
 
@@ -90,10 +95,18 @@ sudo apt install build-essential cmake pkg-config \
     frei0r-plugins-dev libegl1-mesa-dev libgl-dev
 ```
 
-On some distributions the Frei0r development package may be called:
+Arch Linux:
 
 ```bash
-libfrei0r-dev
+sudo pacman -Syu
+sudo pacman -S --needed base-devel cmake pkgconf frei0r-plugins libglvnd mesa
+```
+
+Fedora:
+
+```bash
+sudo dnf install gcc-c++ make cmake pkg-config \
+    frei0r-devel mesa-libGL-devel mesa-libEGL-devel
 ```
 
 You also need `stb_image.h` in the source directory. This is already provided in the repo.
@@ -106,11 +119,10 @@ wget https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 ---
 
-## Build
+### Build
 
 ```bash
-mkdir build
-cd build
+cd build-linux
 cmake ..
 make
 ```
@@ -121,53 +133,75 @@ This produces:
 shadertoy.so
 ```
 
----
-
-## Install the plugin
-
-Copy the plugin into a Frei0r plugin directory.
-
-Per-user, no root required:
-
-```bash
-mkdir -p ~/.frei0r-1/lib
-cp shadertoy.so ~/.frei0r-1/lib/
-```
-
-Or system-wide:
-
-```bash
-sudo cp shadertoy.so /usr/lib/frei0r-1/
-```
-
-If Kdenlive does not see the plugin, launch Kdenlive with:
-
-```bash
-FREI0R_PATH=~/.frei0r-1/lib kdenlive
-```
+Now copy `shadert0y.xml` from the root folder to the `build-linux` folder.
 
 ---
 
-## Install the Kdenlive effect XML
-
-The `shadert0y.xml` file provides the Kdenlive effect UI and parameter layout.
-
-Copy it to your Kdenlive effects directory:
+### Install the plugin
 
 ```bash
-mkdir -p ~/.local/share/kdenlive/effects
-cp shadert0y.xml ~/.local/share/kdenlive/effects/
+chmod +x install.sh
+./install.sh
 ```
+
+To uninstall:
+
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+## On Windows
+
+The easiest way to build natively on Windows is using the **MSYS2 MinGW64 environment**.
+
+### Dependencies:
+
+Download and install [MSYS2](https://www.msys2.org).
+Open the `MSYS2 MinGW x64` terminal from your Start Menu and paste these commands:
+
+Install the toolchain:
+
+```bash
+   pacman -Syu
+   pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-nsis mingw-w64-x86_64-cmake
+```
+
+Now go to your repository directory using `cd`. Use `/` instead of `\`, for example:
+
+```
+cd C:\Users\Administrator\Downloads
+```
+
+Will be written as:
+
+```
+cd /c/Users/Administrator/Downloads
+```
+
+### Build:
+
+```bash
+cd ./build-windows
+mkdir x64 && cd x64
+cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release ..
+cmake --build .
+```
+
+Now copy `shadert0y.xml` from the root folder to the `build-windows` folder.
+Lastly, run:
+
+```bash
+makensis shadert0y.nsi
+```
+
+And open the `.exe` installer.
 
 Then restart Kdenlive.
 
-Search the effects list for:
+Search the effects list for `Shadert0y`.
 
-```txt
-Shadert0y
-```
-
-If an old version of the effect is already on a clip, remove it and add it
+If an old version of the effect is already on a clip, you may have to uninstall it and install it
 again after updating the plugin/XML.
 
 ---
