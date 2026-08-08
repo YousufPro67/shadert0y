@@ -84,6 +84,28 @@ normal filter.
 
 It is not recommended to build manually unless the installers don't work or you are on ARM. Get pre-built packages from [Releases](https://github.com/YousufPro67/shadert0y/releases).
 
+## AppImage
+
+I have already provided a pre-built AppImage with the plugin added, but if you want an updated Kdenlive version or another plugin included, you'll need to re-build it. It's quite simple actually.
+
+Get Kdenlive AppImage from [the download page](https://kdenlive.org/download/).
+
+Open Terminal in the parent directory and extract the AppImage.
+
+```bash
+./appimagename.AppImage --appimage-extract
+```
+
+It will make a folder named `squashfs-root` in the parent directory. Copy the `.so` file (get prebuilt from releases or build using the guide in the [next section](https://github.com/YousufPro67/shadert0y/#on-linux)) in `squashfs-root/usr/lib/frei0r-1` and `.xml` file in `squashfs-root/usr/share/kdenlive/effects`.
+
+Now get the [appimagetool](https://github.com/AppImage/appimagetool/releases), make sure it is in the same directory where `squashfs-root` is and re-build the AppImage.
+
+```bash
+ARCH=x86_64 ./appimagetool-x86_64.AppImage ./squashfs-root
+```
+
+The name of the tool may differ, depending on the version you downloaded. Now you can just run the modified Kdenlive AppImage and the plugin will be there.
+
 ## On Linux
 
 ### Dependencies
