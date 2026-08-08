@@ -1,4 +1,4 @@
-<img width="533" height="300" radius=100px alt="shadert0y_logo_banner" src="https://github.com/user-attachments/assets/b43392cc-2896-4b5f-ad1d-ce1c24add6eb" />
+<img width="533" height="300" alt="shadert0y_logo_banner" src="https://github.com/user-attachments/assets/b43392cc-2896-4b5f-ad1d-ce1c24add6eb" />
 
 
 A Frei0r filter plugin that runs Shadertoy GLSL shaders inside Kdenlive,
