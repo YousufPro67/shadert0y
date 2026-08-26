@@ -1,5 +1,15 @@
 <img width="533" height="300" alt="shadert0y_logo_banner" src="https://github.com/user-attachments/assets/b43392cc-2896-4b5f-ad1d-ce1c24add6eb" />
 
+<p align="left">
+  <a href="https://github.com/YousufPro67/shadert0y/releases"><img src="https://img.shields.io/github/v/release/YousufPro67/shadert0y?label=release&display_name=tag&sort=semver&color=blue" alt="GitHub Release"></a>
+  <a href="https://github.com/YousufPro67/shadert0y/releases/tag/v1.0.0"><img src="https://img.shields.io/github/v/tag/YousufPro67/shadert0y?label=version&color=brightgreen" alt="GitHub Tag"></a>
+  <a href="https://github.com/YousufPro67/shadert0y/blob/main/LICENSE"><img src="https://img.shields.io/github/license/YousufPro67/shadert0y?color=orange" alt="License: GPL-3.0"></a>
+  <a href="https://github.com/YousufPro67/shadert0y/stargazers"><img src="https://img.shields.io/github/stars/YousufPro67/shadert0y?style=social" alt="GitHub Stars"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey" alt="Platform: Linux | Windows">
+  <img src="https://img.shields.io/badge/C++-00599C?logo=c%2B%2B&logoColor=white" alt="C++">
+  <a href="https://deepwiki.com/YousufPro67/shadert0y"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <a href="https://github.com/YousufPro67/shadert0y/releases"><img src="https://img.shields.io/github/downloads/YousufPro67/shadert0y/total?color=9cf" alt="Downloads"></a>
+</p>
 
 A Frei0r filter plugin that runs Shadertoy GLSL shaders inside Kdenlive,
 or other MLT-based hosts.
