@@ -769,7 +769,7 @@ stb_image.h      image loading library
 README.md        this file
 examples/        example shaders
 ```
-Deepwiki: https://deepwiki.com/YousufPro67/shadert0y
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/YousufPro67/shadert0y)
 
 ## License
 
