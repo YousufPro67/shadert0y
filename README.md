@@ -11,6 +11,12 @@
   <a href="https://github.com/YousufPro67/shadert0y/releases"><img src="https://img.shields.io/github/downloads/YousufPro67/shadert0y/total?color=9cf" alt="Downloads"></a>
 </p>
 
+<p align="left">
+  <a href="https://discuss.kde.org/t/a-wave-of-effects-new-shadertoy-plugin-for-kdenlive/49097"><img src="https://img.shields.io/badge/KDE_Discuss-1D99F3?logo=kde&logoColor=white" alt="KDE Discuss"></a>
+  <a href="https://store.kde.org/p/2368056/"><img src="https://img.shields.io/badge/KDE_Store-1D99F3?logo=kde&logoColor=white" alt="KDE Store"></a>
+  <a href="https://www.youtube.com/watch?v=YGuisxTyVQ8"><img src="https://img.shields.io/badge/Demo-YouTube-FF0000?logo=youtube&logoColor=white" alt="YouTube Demo"></a>
+</p>
+
 A Frei0r filter plugin that runs Shadertoy GLSL shaders inside Kdenlive,
 or other MLT-based hosts.
 
