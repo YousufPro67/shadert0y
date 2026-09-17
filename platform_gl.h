@@ -10,7 +10,51 @@
   #endif
   #include <windows.h>
   #include <GL/gl.h>
-  #include <GL/glext.h>
+  #if defined(__MINGW32__) || defined(__MINGW64__)
+    #include <GL/glext.h>
+    #define SHADERT0Y_HAVE_GLEXT 1
+  #elif defined(__has_include) && __has_include(<GL/glext.h>)
+    #include <GL/glext.h>
+    #define SHADERT0Y_HAVE_GLEXT 1
+  #endif
+  #ifndef SHADERT0Y_HAVE_GLEXT
+    #ifndef GL_TEXTURE0
+    #define GL_TEXTURE0 0x84C0
+    #endif
+    #ifndef GL_CLAMP_TO_EDGE
+    #define GL_CLAMP_TO_EDGE 0x812F
+    #endif
+    #ifndef GL_RGBA8
+    #define GL_RGBA8 0x8058
+    #endif
+    #ifndef GL_VERTEX_SHADER
+    #define GL_VERTEX_SHADER 0x8B31
+    #endif
+    #ifndef GL_FRAGMENT_SHADER
+    #define GL_FRAGMENT_SHADER 0x8B30
+    #endif
+    #ifndef GL_COMPILE_STATUS
+    #define GL_COMPILE_STATUS 0x8B81
+    #endif
+    #ifndef GL_LINK_STATUS
+    #define GL_LINK_STATUS 0x8B82
+    #endif
+    #ifndef GL_FRAMEBUFFER
+    #define GL_FRAMEBUFFER 0x8D40
+    #endif
+    #ifndef GL_READ_FRAMEBUFFER
+    #define GL_READ_FRAMEBUFFER 0x8CA8
+    #endif
+    #ifndef GL_DRAW_FRAMEBUFFER
+    #define GL_DRAW_FRAMEBUFFER 0x8CA9
+    #endif
+    #ifndef GL_COLOR_ATTACHMENT0
+    #define GL_COLOR_ATTACHMENT0 0x8CE0
+    #endif
+    #ifndef GL_FRAMEBUFFER_COMPLETE
+    #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+    #endif
+  #endif
 
   // WGL core-profile extension (not in gl.h)
   typedef HGLRC (WINAPI *PFNWGLCREATECONTEXTATTRIBSARBPROC)(HDC, HGLRC, const int*);
@@ -228,7 +272,8 @@ static bool platformMakeCurrent(PlatformGL& pg) {
     return CGLSetCurrentContext(pg.ctx) == kCGLNoError;
 }
 static void platformShutdown(PlatformGL& pg) {
-    if (pg.ctx) { CGLClearContext(pg.ctx); CGLDestroyContext(pg.ctx); }
+    // CGL has no "clear context" call; passing null detaches the current one.
+    if (pg.ctx) { CGLSetCurrentContext(nullptr); CGLDestroyContext(pg.ctx); }
     pg = PlatformGL();
 }
 
