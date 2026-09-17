@@ -10,6 +10,7 @@
   #endif
   #include <windows.h>
   #include <GL/gl.h>
+
   #if defined(__MINGW32__) || defined(__MINGW64__)
     #include <GL/glext.h>
     #define SHADERT0Y_HAVE_GLEXT 1
@@ -18,6 +19,8 @@
     #define SHADERT0Y_HAVE_GLEXT 1
   #endif
   #ifndef SHADERT0Y_HAVE_GLEXT
+
+    typedef char GLchar;
     #ifndef GL_TEXTURE0
     #define GL_TEXTURE0 0x84C0
     #endif
