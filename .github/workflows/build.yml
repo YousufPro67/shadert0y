@@ -1,0 +1,88 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# NOTE: Release builds + Release asset uploads live in release.yml,
+# which implements all README build methods (Linux + Windows NSIS).
+# This workflow is CI-only so releases don't get duplicate assets.
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            ccflags: "-DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++"
+            artifact: shadert0y-linux-x86_64.so
+            binary: shadert0y.so
+          - name: linux-clang
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            ccflags: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+            artifact: shadert0y-linux-x86_64-clang.so
+            binary: shadert0y.so
+          - name: windows-msvc
+            os: windows-latest
+            cc: cl
+            cxx: cl
+            # MSVC is resolved by the default Visual Studio generator;
+            # forcing -DCMAKE_*__COMPILER=cl fails in bash (cl not on PATH).
+            ccflags: ""
+            artifact: shadert0y-windows-x64.dll
+            binary: shadert0y.dll
+          - name: macos-clang
+            os: macos-latest
+            cc: clang
+            cxx: clang++
+            ccflags: "-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++"
+            artifact: shadert0y-macos.so
+            binary: shadert0y.so
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libgl1-mesa-dev libegl1-mesa-dev libglx-dev
+
+    - name: Configure CMake
+      shell: bash
+      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release ${{ matrix.ccflags }}
+
+    - name: Build
+      run: cmake --build build --config Release --parallel
+
+    - name: Collect artifacts
+      shell: bash
+      run: |
+        mkdir -p dist
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          cp build/Release/${{ matrix.binary }} dist/${{ matrix.artifact }}
+        else
+          cp build/${{ matrix.binary }} dist/${{ matrix.artifact }}
+        fi
+        cp shadert0y.xml dist/shadert0y.xml
+
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.name }}
+        path: dist/*
