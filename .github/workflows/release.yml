@@ -271,10 +271,15 @@ jobs:
           /mingw64/bin/cmake --build build-windows/x64 --parallel
 
       - name: Build x86 DLL (MinGW Makefiles, 32-bit)
+        # The i686 toolchain lives in /mingw32/bin, which is only on PATH
+        # in a MINGW32 shell (job default is MINGW64 -> compiler not found).
+        env:
+          MSYSTEM: MINGW32
         run: |
+          command -v i686-w64-mingw32-gcc && command -v i686-w64-mingw32-g++
           mkdir -p build-windows/x86
-          /mingw64/bin/cmake -S . -B build-windows/x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++
-          /mingw64/bin/cmake --build build-windows/x86 --parallel
+          cmake -S . -B build-windows/x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++
+          cmake --build build-windows/x86 --parallel
 
       - name: Copy XML + build NSIS installer (README final steps)
         run: |
