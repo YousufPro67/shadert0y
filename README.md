@@ -60,6 +60,7 @@ The plugin adds those automatically.
   - `File 3`
 - `File 0`, `File 1`, `File 2`, and `File 3` can be:
   - image files
+  - video files
   - basic standalone `.glsl` shader buffers
 - Internal render resolution override:
   - shader can render at a fixed project resolution
@@ -89,7 +90,6 @@ Not supported:
 - Webcam / keyboard input
 - Real host mouse input
 - Grabbing arbitrary clips from the Kdenlive timeline
-- Decoding video files inside `File 0/1/2`
 - Linear-light / HDR color management
 
 The plugin receives only the current input frame from the host. It cannot ask
@@ -258,10 +258,10 @@ again after updating the plugin/XML.
 | 5 | `iChannel1` | list | Source for `iChannel1` |
 | 6 | `iChannel2` | list | Source for `iChannel2` |
 | 7 | `iChannel3` | list | Source for `iChannel3` |
-| 8 | `File 0` | file path | Image file or basic shader buffer |
-| 9 | `File 1` | file path | Image file or basic shader buffer |
-| 10 | `File 2` | file path | Image file or basic shader buffer |
-| 11 | `File 3` | file path | Image file or basic shader buffer |
+| 8 | `File 0` | file path | Image, video, or basic shader buffer |
+| 9 | `File 1` | file path | Image, video, or basic shader buffer |
+| 10 | `File 2` | file path | Image, video, or basic shader buffer |
+| 11 | `File 3` | file path | Image, video, or basic shader buffer |
 | 12 | `Mouse X` | animated float | Normalized mouse X, `0.0` to `1.0` |
 | 13 | `Mouse Y` | animated float | Normalized mouse Y, `0.0` to `1.0` |
 | 14 | `Render Width` | int | Internal shader render width. `0` = automatic |
@@ -282,6 +282,7 @@ again after updating the plugin/XML.
   - `None`: `1x1`
   - `Current Clip`: incoming host frame size
   - image file: image size
+  - video file: video size
   - shader buffer file: internal render resolution
 
 ---
@@ -394,6 +395,37 @@ normal Shadertoy-style UV coordinates.
 
 ---
 
+## Using video files
+
+`File 0`, `File 1`, `File 2`, and `File 3` also accept video files. They are
+decoded in sync with the timeline and can be sampled like any other channel:
+
+```txt
+iChannel0 = File 0
+File 0 = /home/user/Videos/clip.mp4
+```
+
+Then in the shader:
+
+```glsl
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    vec2 uv = fragCoord / iResolution.xy;
+    fragColor = texture(iChannel0, uv);
+}
+```
+
+Behavior:
+
+- The frame shown matches the timeline position, following the `Speed`
+  parameter, and loops automatically once the end is reached.
+- Scrubbing or jumping on the timeline seeks inside the video.
+- `iChannelResolution` reports the video's native size.
+- Videos with rotation metadata are displayed upright.
+- Audio tracks inside video files are ignored.
+
+---
+
 ## Using basic shader buffer files
 
 `File 0`, `File 1`, `File 2`, and `File 3` can also be standalone shader scripts.
@@ -492,8 +524,8 @@ The main shader file is watched by modification time.
 You can edit the shader in a text editor and scrub the Kdenlive timeline to see
 changes.
 
-File buffers and image files are also reloaded when their modification time
-changes.
+File buffers, image files, and video files are also reloaded when their
+modification time changes.
 
 ---
 
@@ -707,9 +739,8 @@ iChannel0 = File 0
 File 0 = /home/user/Pictures/image.png
 ```
 
-Video and audio files are not decoded. If you point a file parameter at a video
-or music file, it will simply fail to load and the channel will fall back to
-black.
+The same applies to image and video files: check the path, the format, and that
+the matching iChannel is set to the right `File` slot.
 
 ---
 
