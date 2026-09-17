@@ -24,48 +24,48 @@
         <comment>Off = force alpha to 1.0 (opaque). On = keep the alpha written by the shader.</comment>
     </parameter>
 
-    <parameter type="list" name="4" default="1" paramlist="0;1;2;3;4;5">
+    <parameter type="list" name="4" default="1" paramlist="0;1;2;3;4;5;6">
         <name>iChannel0</name>
-        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3</paramlistdisplay>
+        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3,Video Alpha</paramlistdisplay>
     </parameter>
 
-    <parameter type="list" name="5" default="0" paramlist="0;1;2;3;4;5">
+    <parameter type="list" name="5" default="0" paramlist="0;1;2;3;4;5;6">
         <name>iChannel1</name>
-        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3</paramlistdisplay>
+        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3,Video Alpha</paramlistdisplay>
     </parameter>
 
-    <parameter type="list" name="6" default="0" paramlist="0;1;2;3;4;5">
+    <parameter type="list" name="6" default="0" paramlist="0;1;2;3;4;5;6">
         <name>iChannel2</name>
-        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3</paramlistdisplay>
+        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3,Video Alpha</paramlistdisplay>
     </parameter>
 
-    <parameter type="list" name="7" default="0" paramlist="0;1;2;3;4;5">
+    <parameter type="list" name="7" default="0" paramlist="0;1;2;3;4;5;6">
         <name>iChannel3</name>
-        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3</paramlistdisplay>
+        <paramlistdisplay>None,Current Clip,File 0,File 1,File 2,File 3,Video Alpha</paramlistdisplay>
     </parameter>
 
     <parameter type="url" name="8" default=""
-               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt|Images and shader buffers">
+               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt *.mp4 *.mov *.mkv *.webm *.avi *.wmv *.mpg *.mpeg *.ts *.m4v *.3gp *.ogv *.flv|Images, videos and shader buffers">
         <name>File 0</name>
-        <comment>Image file or basic .glsl buffer script used when an iChannel is set to File 0.</comment>
+        <comment>Image, video, or basic .glsl buffer used when an iChannel is set to File 0.</comment>
     </parameter>
 
     <parameter type="url" name="9" default=""
-               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt|Images and shader buffers">
+               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt *.mp4 *.mov *.mkv *.webm *.avi *.wmv *.mpg *.mpeg *.ts *.m4v *.3gp *.ogv *.flv|Images, videos and shader buffers">
         <name>File 1</name>
-        <comment>Image file or basic .glsl buffer script used when an iChannel is set to File 1.</comment>
+        <comment>Image, video, or basic .glsl buffer used when an iChannel is set to File 1.</comment>
     </parameter>
 
     <parameter type="url" name="10" default=""
-               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt|Images and shader buffers">
+               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt *.mp4 *.mov *.mkv *.webm *.avi *.wmv *.mpg *.mpeg *.ts *.m4v *.3gp *.ogv *.flv|Images, videos and shader buffers">
         <name>File 2</name>
-        <comment>Image file or basic .glsl buffer script used when an iChannel is set to File 2.</comment>
+        <comment>Image, video, or basic .glsl buffer used when an iChannel is set to File 2.</comment>
     </parameter>
 
     <parameter type="url" name="11" default=""
-               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt|Images and shader buffers">
+               filter="*.png *.jpg *.jpeg *.bmp *.tga *.glsl *.frag *.txt *.mp4 *.mov *.mkv *.webm *.avi *.wmv *.mpg *.mpeg *.ts *.m4v *.3gp *.ogv *.flv|Images, videos and shader buffers">
         <name>File 3</name>
-        <comment>Image file or basic .glsl buffer script used when an iChannel is set to File 3.</comment>
+        <comment>Image, video, or basic .glsl buffer used when an iChannel is set to File 3.</comment>
     </parameter>
 
     <parameter type="animated" name="12" default="0" min="0" max="1" decimals="3">
