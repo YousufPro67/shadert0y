@@ -1,0 +1,477 @@
+name: Release
+
+# Automatic release builds. Follows every build method documented in README.md
+# and attaches the built files to the GitHub Release as download assets:
+#   - Linux (Debian/Ubuntu, Arch, Fedora dependency sets) -> .so + .xml +
+#     install.sh/uninstall.sh bundled as .tar.gz + .zip
+#   - Windows (MSYS2 MinGW64, per README) -> x64 + x86 .dll + .xml +
+#     NSIS .exe installer + portable .zip files
+#   - macOS (CMake APPLE branch: OpenGL + CoreFoundation frameworks) ->
+#     .so + .xml bundled as .tar.gz + .zip (arm64 + x86_64)
+#   - AppImage (README "AppImage": inject .so + .xml into a Kdenlive
+#     AppImage via --appimage-extract + appimagetool) ->
+#     shadert0y-<tag>-kdenlive-x86_64.AppImage
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      kdenlive_appimage_url:
+        description: 'Override Kdenlive base AppImage URL (AppImage job only)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  BUILD_TYPE: Release
+  # Bump when Kdenlive publishes a new stable AppImage (see https://kdenlive.org/download).
+  KDENLIVE_APPIMAGE_URL: 'https://download.kde.org/stable/kdenlive/26.08/linux/kdenlive-26.08.1-x86_64.AppImage'
+  APPIMAGETOOL_URL: 'https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage'
+
+jobs:
+  # ------------------------------------------------------------------
+  # Linux — Debian/Ubuntu method (README "On Linux / Debian/Ubuntu")
+  #   sudo apt install build-essential cmake pkg-config \
+  #       frei0r-plugins-dev libegl1-mesa-dev libgl-dev
+  #   cd build-linux
+  #   cmake ..
+  #   make
+  # ------------------------------------------------------------------
+  build-linux-ubuntu:
+    name: linux (ubuntu/debian)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Debian/Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            frei0r-plugins-dev libegl1-mesa-dev libgl-dev zip
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        # NOTE: README uses `cd build-linux; cmake ..; make`. Using an
+        # out-of-source `build/` dir here keeps install.sh/uninstall.sh
+        # clean; the produced binary is identical.
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: "Stage package (README: copy shadert0y.xml next to the .so)"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          cp build/shadert0y.so package/
+          cp shadert0y.xml package/
+          cp build-linux/install.sh build-linux/uninstall.sh package/
+          chmod +x package/install.sh package/uninstall.sh
+          cp LICENSE package/ 2>/dev/null || true
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          tar -czf "release-assets/shadert0y-${TAG}-linux-x86_64-ubuntu.tar.gz" -C package .
+          (cd package && zip -r "../release-assets/shadert0y-${TAG}-linux-x86_64-ubuntu.zip" .)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-ubuntu
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # Linux — Fedora method (README "On Linux / Fedora")
+  #   sudo dnf install gcc-c++ make cmake pkg-config \
+  #       frei0r-devel mesa-libGL-devel mesa-libEGL-devel
+  # ------------------------------------------------------------------
+  build-linux-fedora:
+    name: linux (fedora)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Fedora)
+        run: |
+          dnf install -y gcc-c++ make cmake pkg-config \
+            frei0r-devel mesa-libGL-devel mesa-libEGL-devel \
+            zip tar gzip file findutils
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Stage package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          cp build/shadert0y.so package/
+          cp shadert0y.xml package/
+          cp build-linux/install.sh build-linux/uninstall.sh package/
+          chmod +x package/install.sh package/uninstall.sh
+          cp LICENSE package/ 2>/dev/null || true
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          tar -czf "release-assets/shadert0y-${TAG}-linux-x86_64-fedora.tar.gz" -C package .
+          (cd package && zip -r "../release-assets/shadert0y-${TAG}-linux-x86_64-fedora.zip" .)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-fedora
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # Linux — Arch method (README "On Linux / Arch Linux")
+  #   sudo pacman -Syu
+  #   sudo pacman -S --needed base-devel cmake pkgconf frei0r-plugins libglvnd mesa
+  # ------------------------------------------------------------------
+  build-linux-arch:
+    name: linux (arch)
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Arch)
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --needed --noconfirm base-devel cmake pkgconf frei0r-plugins libglvnd mesa zip tar gzip file
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Stage package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          cp build/shadert0y.so package/
+          cp shadert0y.xml package/
+          cp build-linux/install.sh build-linux/uninstall.sh package/
+          chmod +x package/install.sh package/uninstall.sh
+          cp LICENSE package/ 2>/dev/null || true
+
+      - name: Create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          tar -czf "release-assets/shadert0y-${TAG}-linux-x86_64-arch.tar.gz" -C package .
+          (cd package && zip -r "../release-assets/shadert0y-${TAG}-linux-x86_64-arch.zip" .)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arch
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # Windows — MSYS2 MinGW64 method (README "On Windows")
+  #   pacman -Syu
+  #   pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-nsis mingw-w64-x86_64-cmake
+  #   cd ./build-windows
+  #   mkdir x64 && cd x64
+  #   cmake -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release ..
+  #   cmake --build .
+  #   (copy shadert0y.xml from root to build-windows folder)
+  #   makensis shadert0y.nsi
+  #
+  # Notes:
+  # - README's `cmake ..` from build-windows/x64 is a path bug (it points at
+  #   build-windows, not the repo root). We use `cmake -S ../.. -B .`
+  #   semantics via `-S . -B build-windows/x64` which is equivalent and robust.
+  # - shadert0y.nsi supports both x64\ and x86\ DLLs, so we additionally
+  #   install mingw-w64-i686-toolchain and build the x86 DLL too.
+  # ------------------------------------------------------------------
+  build-windows:
+    name: windows (msys2 mingw + nsis)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-nsis
+            mingw-w64-i686-toolchain
+            mingw-w64-i686-cmake
+            make
+            zip
+            unzip
+            tar
+
+      - name: Resolve tag
+        shell: msys2 {0}
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+          # NSIS OutFile dislikes a leading `v` (v1.0.0 -> 1.0.0)
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "NSIS version: $VERSION"
+
+      - name: Build x64 DLL (MinGW Makefiles)
+        run: |
+          mkdir -p build-windows/x64
+          /mingw64/bin/cmake -S . -B build-windows/x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          /mingw64/bin/cmake --build build-windows/x64 --parallel
+
+      - name: Build x86 DLL (MinGW Makefiles, 32-bit)
+        run: |
+          mkdir -p build-windows/x86
+          /mingw64/bin/cmake -S . -B build-windows/x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++
+          /mingw64/bin/cmake --build build-windows/x86 --parallel
+
+      - name: Copy XML + build NSIS installer (README final steps)
+        run: |
+          set -euo pipefail
+          cp shadert0y.xml build-windows/shadert0y.xml
+          ls -lh build-windows/x64/shadert0y.dll build-windows/x86/shadert0y.dll build-windows/shadert0y.xml
+          cd build-windows
+          /mingw64/bin/makensis "/DVERSION=${VERSION}" shadert0y.nsi
+          ls -lh ./*.exe
+
+      - name: Create portable zips + collect assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # Installer (already versioned by the .nsi: shadert0y-<VERSION>-windows-setup.exe)
+          cp build-windows/*.exe release-assets/
+          # Portable x64 zip
+          mkdir -p portable-x64
+          cp build-windows/x64/shadert0y.dll portable-x64/
+          cp shadert0y.xml portable-x64/
+          (cd portable-x64 && zip -r "../release-assets/shadert0y-${TAG}-windows-x64.zip" .)
+          # Portable x86 zip
+          mkdir -p portable-x86
+          cp build-windows/x86/shadert0y.dll portable-x86/
+          cp shadert0y.xml portable-x86/
+          (cd portable-x86 && zip -r "../release-assets/shadert0y-${TAG}-windows-x86.zip" .)
+          ls -lh release-assets/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # macOS — CMake APPLE branch (CMakeLists.txt: OpenGL + CoreFoundation)
+  #   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+  #   cmake --build build --parallel
+  # No extra dependencies: uses the macOS OpenGL framework.
+  # Builds both arm64 (native) and x86_64 (via CMAKE_OSX_ARCHITECTURES)
+  # since Kdenlive ships separate Silicon/Intel DMGs.
+  # ------------------------------------------------------------------
+  build-macos:
+    name: macos (arm64 + x86_64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+
+      - name: Configure CMake (arm64, native)
+        run: cmake -S . -B build-arm64 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build (arm64)
+        run: cmake --build build-arm64 --parallel
+
+      - name: Configure CMake (x86_64)
+        run: cmake -S . -B build-x64 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCMAKE_OSX_ARCHITECTURES=x86_64
+
+      - name: Build (x86_64)
+        run: cmake --build build-x64 --parallel
+
+      - name: Stage packages + create archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for arch in arm64 x64; do
+            if [ "$arch" = "arm64" ]; then bindir="build-arm64"; label="macos-arm64"; else bindir="build-x64"; label="macos-x86_64"; fi
+            mkdir -p "package-$arch"
+            cp "$bindir/shadert0y.so" "package-$arch/"
+            cp shadert0y.xml "package-$arch/"
+            cp LICENSE "package-$arch/" 2>/dev/null || true
+            tar -czf "release-assets/shadert0y-${TAG}-${label}.tar.gz" -C "package-$arch" .
+            (cd "package-$arch" && zip -r "../release-assets/shadert0y-${TAG}-${label}.zip" .)
+          done
+          ls -lh release-assets/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # AppImage — README "AppImage" method:
+  #   ./kdenlive-*.AppImage --appimage-extract   # -> squashfs-root/
+  #   cp shadert0y.so squashfs-root/usr/lib/frei0r-1/
+  #   cp shadert0y.xml squashfs-root/usr/share/kdenlive/effects/
+  #   ARCH=x86_64 ./appimagetool-x86_64.AppImage ./squashfs-root
+  # The plugin .so is built from source in this job (same README
+  # "On Linux" steps), then injected into the Kdenlive base AppImage.
+  # Bump KDENLIVE_APPIMAGE_URL (top of file) when Kdenlive releases.
+  # ------------------------------------------------------------------
+  build-appimage:
+    name: appimage (kdenlive + plugin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (README Debian/Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            frei0r-plugins-dev libegl1-mesa-dev libgl-dev \
+            curl file zsync desktop-file-utils zip
+
+      - name: Resolve tag + URLs
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG="${TAG#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building for tag: $TAG"
+          if [ -n "${{ inputs.kdenlive_appimage_url }}" ]; then
+            echo "KDENLIVE_URL=${{ inputs.kdenlive_appimage_url }}" >> "$GITHUB_ENV"
+          else
+            echo "KDENLIVE_URL=${{ env.KDENLIVE_APPIMAGE_URL }}" >> "$GITHUB_ENV"
+          fi
+          echo "Kdenlive base: ${{ inputs.kdenlive_appimage_url || env.KDENLIVE_APPIMAGE_URL }}"
+
+      - name: Build plugin (README On Linux)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          cmake --build build --parallel
+          ls -lh build/shadert0y.so shadert0y.xml
+
+      - name: Download Kdenlive base AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p appimage-work && cd appimage-work
+          curl -fSL --retry 3 -o kdenlive-base.AppImage "$KDENLIVE_URL"
+          chmod +x kdenlive-base.AppImage
+          ls -lh kdenlive-base.AppImage
+
+      - name: Extract + inject plugin (README AppImage steps)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd appimage-work
+          ./kdenlive-base.AppImage --appimage-extract
+          mkdir -p squashfs-root/usr/lib/frei0r-1 squashfs-root/usr/share/kdenlive/effects
+          cp ../build/shadert0y.so squashfs-root/usr/lib/frei0r-1/
+          cp ../shadert0y.xml squashfs-root/usr/share/kdenlive/effects/
+          ls -lh squashfs-root/usr/lib/frei0r-1/shadert0y.so squashfs-root/usr/share/kdenlive/effects/shadert0y.xml
+
+      - name: Repack with appimagetool (README AppImage step)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd appimage-work
+          curl -fSL --retry 3 -o appimagetool.AppImage "${{ env.APPIMAGETOOL_URL }}"
+          chmod +x appimagetool.AppImage
+          mkdir -p ../release-assets
+          export ARCH=x86_64
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./appimagetool.AppImage ./squashfs-root "../release-assets/shadert0y-${TAG}-kdenlive-x86_64.AppImage"
+          ls -lh ../release-assets/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: release-assets/*
+
+  # ------------------------------------------------------------------
+  # Attach everything to the GitHub Release as download files
+  # ------------------------------------------------------------------
+  publish-release:
+    name: publish to release
+    runs-on: ubuntu-latest
+    needs: [build-linux-ubuntu, build-linux-fedora, build-linux-arch, build-windows, build-macos, build-appimage]
+    if: github.event_name == 'release'
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lhR release-assets
+          (cd release-assets && sha256sum * > SHA256SUMS.txt)
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: true
