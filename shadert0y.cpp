@@ -1,4 +1,7 @@
+// I just asked AI to format it into the most readable form possible, it may look ai now tho
+// it's just that it was a mess before and i want any programmer to understand it easily
 #include "platform_gl.h"
+#include "ffmpeg_dl.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +13,7 @@
 #include <sstream>
 #include <iterator>
 #include <cctype>
+#include <cmath>
 #include <sys/stat.h>
 #include <ctime>
 
@@ -20,8 +24,8 @@ extern "C" {
 #include "frei0r.h"
 }
 
-// Default tiny shader
-// ---------------------------------------------------------------------------
+
+
 static const char* kDefaultShader = R"GLSL(
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
@@ -67,6 +71,7 @@ uniform float      iParam4;
 uniform float      iParam5;
 uniform float      iParam6;
 uniform float      iParam7;
+
 
 uniform float      f0rUseShaderAlpha;
 )GLSL";
@@ -254,7 +259,277 @@ static void bindChannel(RenderPass& p, int idx, GLuint tex) {
 }
 
 // ---------------------------------------------------------------------------
-// File slot: image or basic shader buffer
+// Video file decoding (see ffmpeg_dl.h)
+// ---------------------------------------------------------------------------
+// Matches common video container extensions. Files that are not shader
+// sources and not decodable as images fall through to the video decoder as
+// a last resort, so unknown containers still work.
+static bool isVideoFile(const std::string& path) {
+    static const char* exts[] = {
+        ".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi", ".wmv", ".flv",
+        ".mpg", ".mpeg", ".mp2", ".ts", ".mts", ".m2ts", ".3gp", ".ogv",
+        ".gifv", ".vob", ".mxf", ".dv", ".wtv", ".asf", ".divx", ".f4v",
+        ".m2v", ".svi", ".nut", ".rm", ".rmvb", ".amv", ".m4p", ".qt",
+        nullptr
+    };
+    for (int i = 0; exts[i]; ++i) {
+        if (endsWithCI(path, exts[i])) return true;
+    }
+    return false;
+}
+
+// Decodes the frame at a given time from a video stream. Everything
+// FFmpeg-related is resolved at runtime through ffdl::api() so the plugin
+// stays a plain frei0r module with no hard FFmpeg link-time dependency.
+struct VideoPlayer {
+    ffdl::FmtCtx* fmt = nullptr;      // AVFormatContext*
+    void* cod = nullptr;             // AVCodecContext*
+    ffdl::Frame* frame = nullptr;    // decoded frame
+    ffdl::Frame* next = nullptr;     // one-frame look-ahead
+    void* pkt = nullptr;             // AVPacket*
+    void* sws = nullptr;             // SwsContext*
+
+    int vstream = -1;
+    bool eof = false;
+    bool flushed = false;
+    bool failed = false;
+
+    double durSec = 0.0;             // 0 = unknown
+    ffdl::Ratio vtb = {0, 0};        // video stream time_base
+    int lastRot = -1;                // displaymatrix rotation, -1 = none
+
+    unsigned int w = 0;
+    unsigned int h = 0;
+    int lastPixFmt = -1;
+    std::vector<uint32_t> rgba;   // reused decode target (no per-frame alloc)
+
+    void close() {
+        const ffdl::Api* a = ffdl::api();
+        if (!a || !a->ok) return;
+        if (sws)    { a->sws_freeContext(sws); sws = nullptr; }
+        if (pkt)    { a->av_packet_free(&pkt); pkt = nullptr; }
+        if (next)   { a->av_frame_free(&next); next = nullptr; }
+        if (frame)  { a->av_frame_free(&frame); frame = nullptr; }
+        if (cod)    { a->avcodec_free_context(&cod); cod = nullptr; }
+        if (fmt)    { a->avformat_close_input(&fmt); fmt = nullptr; }
+        vstream = -1;
+        eof = false;
+        flushed = false;
+        failed = false;
+        durSec = 0.0;
+        vtb = ffdl::Ratio{0, 0};
+        lastRot = -1;
+        w = 0;
+        h = 0;
+        lastPixFmt = -1;
+    }
+
+    bool open(const char* path) {
+        close();
+        const ffdl::Api* a = ffdl::api();
+        if (!a || !a->ok) return false;
+
+        if (a->avformat_open_input(&fmt, path, nullptr, nullptr) != 0) {
+            failed = true;
+            return false;
+        }
+        if (a->avformat_find_stream_info(fmt, nullptr) < 0) {
+            close();
+            failed = true;
+            return false;
+        }
+
+        // Find the best video stream, guarding against layout drift: a real
+        // AVStream has index == its position in ctx->streams.
+        vstream = -1;
+        for (uint32_t i = 0; i < fmt->nb_streams && i < 64; ++i) {
+            ffdl::Stream* s = (ffdl::Stream*)fmt->streams[i];
+            if (!s || s->index != (int32_t)i) continue;
+            ffdl::CodecPar* cp = (ffdl::CodecPar*)s->codecpar;
+            if (!cp || cp->codec_type != ffdl::kAVMediaVideo) continue;
+            // Trust a sane time_base; a garbled one means layout mismatch.
+            if (s->time_base.num == 0 || s->time_base.den <= 0) continue;
+            vstream = (int)i;
+            vtb = s->time_base;
+            if (s->duration > 0) {
+                durSec = (double)s->duration * vtb.num / (double)vtb.den;
+            }
+            break;
+        }
+        if (vstream < 0) {
+            close();
+            failed = true;
+            return false;
+        }
+
+        ffdl::Stream* vs = (ffdl::Stream*)fmt->streams[vstream];
+        ffdl::CodecPar* cp = (ffdl::CodecPar*)vs->codecpar;
+
+        const void* dec = a->avcodec_find_decoder(cp->codec_id);
+        if (!dec) { close(); failed = true; return false; }
+        cod = a->avcodec_alloc_context3(dec);
+        if (!cod) { close(); failed = true; return false; }
+        if (a->avcodec_parameters_to_context(cod, cp) < 0) {
+            close(); failed = true; return false;
+        }
+        if (a->avcodec_open2(cod, dec, nullptr) < 0) {
+            close(); failed = true; return false;
+        }
+
+        frame = a->av_frame_alloc();
+        next  = a->av_frame_alloc();
+        pkt   = a->av_packet_alloc();
+        if (!frame || !next || !pkt) { close(); failed = true; return false; }
+
+        failed = false;
+        eof = false;
+        flushed = false;
+        return true;
+    }
+
+    // Decode until a video frame with a valid pts comes out (skipping
+    // AVERROR(EAGAIN) round trips and non-video packets). Returns false on
+    // error or end of file.
+    bool decodeFrame(ffdl::Frame* out) {
+        const ffdl::Api* a = ffdl::api();
+        if (!a || !a->ok || !cod || failed) return false;
+
+        for (;;) {
+            int r = a->avcodec_receive_frame(cod, out);
+            if (r == 0) {
+                if (out->pts == ffdl::kNoPTS) continue;   // skip untimestamped
+                return true;
+            }
+            if (r == ffdl::kAVErrorAgain) {
+                if (eof) {
+                    // Drain: flush the decoder with empty packets.
+                    if (!flushed) {
+                        flushed = true;
+                        a->avcodec_send_packet(cod, nullptr);
+                        continue;
+                    }
+                    return false;                          // fully drained
+                }
+                int rr = a->av_read_frame(fmt, pkt);
+                if (rr < 0) {
+                    eof = true;
+                    continue;
+                }
+                if (((ffdl::Packet*)pkt)->stream_index == vstream) {
+                    a->avcodec_send_packet(cod, pkt);
+                }
+                a->av_packet_unref(pkt);
+                continue;
+            }
+            return false;                                  // hard error
+        }
+    }
+
+    // Display-matrix rotation of the current frame, in degrees, rounded to
+    // the nearest right angle. -1 = no metadata / no rotation.
+    int frameRotation() const {
+        const ffdl::Api* a = ffdl::api();
+        if (!a || !a->ok || !frame || !frame->data[0]) return -1;
+        ffdl::FrameSideData* sd =
+            a->av_frame_get_side_data(frame, ffdl::kFrameDataDisplayMatrix);
+        if (!sd) return -1;
+        double rot = a->av_display_rotation_get(sd->data);
+        if (rot < 0) rot += 360.0;
+        double m = fmod(rot + 45.0, 360.0);
+        if (m < 90.0) return 0;
+        if (m < 180.0) return 90;
+        if (m < 270.0) return 180;
+        return 270;
+    }
+
+    // Present the frame for `tSec` (timeline position in the video's own
+    // clock, after speed mapping). `rgba` receives w*h*4 bytes, top-down
+    // rows. Returns false when nothing could be presented.
+    bool renderAt(double tSec) {
+        const ffdl::Api* a = ffdl::api();
+        if (!a || !a->ok || !cod || failed) return false;
+
+        // Loop at end (unless duration unknown), clamp at start.
+        if (durSec > 0.0) {
+            if (tSec < 0.0) tSec = 0.0;
+            if (tSec >= durSec) tSec = fmod(tSec, durSec);
+        } else if (tSec < 0.0) {
+            tSec = 0.0;
+        }
+
+        double tb = (double)vtb.num / (double)vtb.den;    // seconds per tick
+        int64_t want = (int64_t)(tSec / tb + 0.5);
+
+        // Any backward jump needs a seek (decoding is forward-only); big
+        // forward jumps seek too. Small forward steps just decode ahead.
+        int64_t oneSec = (int64_t)(1.0 / tb + 0.5);
+        if (frame->data[0] &&
+            (want < framePtsTicks() ||
+             want > framePtsTicks() + 3 * oneSec)) {
+            a->avformat_seek_file(fmt, vstream, INT64_MIN, want, INT64_MAX,
+                                  ffdl::kAVSeekBackward);
+            a->avcodec_flush_buffers(cod);
+            eof = false;
+            flushed = false;
+            a->av_frame_unref(frame);
+            a->av_frame_unref(next);
+        }
+
+        // Pull the first frame if we don't have one yet.
+        if (!frame->data[0]) {
+            if (!decodeFrame(frame)) return false;
+        }
+
+        // Advance until frame.pts <= want < next frame pts.
+        for (int guard = 0; guard < 1000; ++guard) {
+            int64_t cur = framePtsTicks();
+            if (cur > want) break;                        // seek landed after target
+
+            if (!next->data[0]) {
+                if (!decodeFrame(next)) break;            // EOF: hold last frame
+            }
+            if (next->pts <= want) {
+                a->av_frame_unref(frame);                 // release the buffer
+                a->av_frame_move_ref(frame, next);        // step forward
+                continue;
+            }
+            break;                                        // frame <= want < next
+        }
+
+        if (!frame->data[0]) return false;
+        w = (unsigned)frame->width;
+        h = (unsigned)frame->height;
+        lastRot = frameRotation();
+
+        // Convert to RGBA.
+        if (frame->format != lastPixFmt || !sws) {
+            if (sws) a->sws_freeContext(sws);
+            sws = a->sws_getContext((int)w, (int)h, frame->format,
+                                    (int)w, (int)h, ffdl::kAVPixFmtRGBA,
+                                    2, nullptr, nullptr, nullptr);  // SWS_BILINEAR
+            lastPixFmt = frame->format;
+        }
+        if (!sws) return false;
+
+        rgba.resize((size_t)w * h);
+        int linesize = (int)(w * 4);
+        // Pass every plane (YUV formats have 3-4 planes; passing only data[0]
+        // makes sws_scale fail with "bad src image pointers").
+        const uint8_t* const src[4] = { frame->data[0], frame->data[1],
+                                        frame->data[2], frame->data[3] };
+        const int srcStride[4]      = { frame->linesize[0], frame->linesize[1],
+                                        frame->linesize[2], frame->linesize[3] };
+        uint8_t* dst[1]             = { (uint8_t*)rgba.data() };
+        int dstStride[1]            = { linesize };
+        int scaled = a->sws_scale(sws, src, srcStride, 0, (int)h, dst, dstStride);
+        return scaled == (int)h;
+    }
+
+    int64_t framePtsTicks() const { return frame->pts; }
+};
+
+// ---------------------------------------------------------------------------
+// File slot: image, shader buffer, or video
 // ---------------------------------------------------------------------------
 struct FileSlot {
     std::string path;
@@ -262,7 +537,7 @@ struct FileSlot {
     std::string loadedSource;
     time_t lastModTime = 0;
 
-    // 0 = none, 1 = image, 2 = shader buffer
+    // 0 = none, 1 = image, 2 = shader buffer, 3 = video
     int mode = 0;
 
     GLuint tex = 0;
@@ -271,6 +546,9 @@ struct FileSlot {
     unsigned int h = 0;
 
     RenderPass pass;
+
+    // Populated only when mode == 3.
+    VideoPlayer video;
 };
 
 struct ShaderInstance {
@@ -291,6 +569,7 @@ struct ShaderInstance {
     unsigned int sceneH = 0;
 
     GLuint inputTex = 0;
+    GLuint inputAlphaTex = 0;
     GLuint blackTex = 0;
 
     FileSlot files[4];
@@ -298,8 +577,14 @@ struct ShaderInstance {
     RenderPass passMain;
 
     std::string scriptPath;
+    std::string lastLoadedPath;
     std::string lastLoadedContent;
     time_t lastFileModTime = 0;
+
+    // Reused per-frame scratch buffers (grown once, never reallocated while
+    // the frame size stays constant).
+    std::vector<uint32_t> scratchInput;
+    std::vector<uint32_t> scratchAlpha;
 
     double speed = 1.0;
     bool flipVideoY = false;
@@ -327,7 +612,7 @@ struct ShaderInstance {
 
     void ensureSceneTargets(unsigned int w, unsigned int h);
     void ensureFileTarget(FileSlot& f, unsigned int w, unsigned int h);
-    void updateFileSlot(int idx, unsigned int rw, unsigned int rh);
+    void updateFileSlot(int idx, unsigned int rw, unsigned int rh, double iTime);
     void renderFileShader(int idx, float iTime, float iTimeDelta, float mouseXPx, float mouseYPx);
 
     ShaderInstance() = default;
@@ -384,7 +669,7 @@ void ShaderInstance::ensureFileTarget(FileSlot& f, unsigned int w, unsigned int 
     gl::glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void ShaderInstance::updateFileSlot(int idx, unsigned int rw, unsigned int rh) {
+void ShaderInstance::updateFileSlot(int idx, unsigned int rw, unsigned int rh, double iTime) {
     FileSlot& f = files[idx];
     bool pathChanged = (f.path != f.lastPath);
 
@@ -392,6 +677,7 @@ void ShaderInstance::updateFileSlot(int idx, unsigned int rw, unsigned int rh) {
         if (f.pass.program) gl::glDeleteProgram(f.pass.program);
         if (f.fbo) gl::glDeleteFramebuffers(1, &f.fbo);
         if (f.tex) glDeleteTextures(1, &f.tex);
+        f.video.close();
 
         f.pass = RenderPass();
         f.fbo = 0;
@@ -430,6 +716,60 @@ void ShaderInstance::updateFileSlot(int idx, unsigned int rw, unsigned int rh) {
         }
         ensureFileTarget(f, rw, rh);
         f.mode = 2;
+        return;
+    }
+
+    // Video: decode the frame at the current timeline position and upload
+    // it as a texture.
+    if (isVideoFile(f.path) || f.mode == 3) {
+        if (!ffdl::api()) {
+            f.mode = 0;
+            return;
+        }
+        if (f.mode != 3 || f.video.failed || f.video.fmt == nullptr ||
+            fileChanged) {
+            if (!f.video.open(f.path.c_str())) {
+                fprintf(stderr, "[shadert0y] File %d '%s' could not be opened as video.\n",
+                        idx, f.path.c_str());
+                f.mode = 0;
+                return;
+            }
+        }
+        f.mode = 3;
+
+        // The video plays on the same iTime clock as the shader (timeline
+        // time * speed). Looping inside renderAt() keeps it in range.
+        if (f.video.renderAt(iTime)) {
+            // Reuse the texture between frames; reallocate only when the
+            // video size changes (e.g. stream resolution switch).
+            if (f.tex && (f.w != f.video.w || f.h != f.video.h)) {
+                glDeleteTextures(1, &f.tex);
+                f.tex = 0;
+            }
+            bool fresh = (f.tex == 0);
+            if (fresh) glGenTextures(1, &f.tex);
+            glBindTexture(GL_TEXTURE_2D, f.tex);
+            if (fresh) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            }
+            // sws_scale writes top-down RGBA; flip once on upload so the
+            // texture orientation matches the image path above.
+            flipRowsRGBA(f.video.rgba.data(), f.video.w, f.video.h);
+            if (fresh) {
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, f.video.w, f.video.h, 0,
+                             GL_RGBA, GL_UNSIGNED_BYTE, f.video.rgba.data());
+            } else {
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, f.video.w, f.video.h,
+                                GL_RGBA, GL_UNSIGNED_BYTE, f.video.rgba.data());
+            }
+            f.w = f.video.w;
+            f.h = f.video.h;
+        }
+        // Keep mode 3 even when renderAt fails (e.g. EOF-hold): the last
+        // good texture stays bound and the slot keeps reporting its size.
         return;
     }
 
@@ -528,6 +868,14 @@ bool ShaderInstance::initGL() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
+    glGenTextures(1, &inputAlphaTex);
+    glBindTexture(GL_TEXTURE_2D, inputAlphaTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
     glGenTextures(1, &blackTex);
     glBindTexture(GL_TEXTURE_2D, blackTex);
     {
@@ -556,6 +904,7 @@ void ShaderInstance::destroy() {
         if (sceneTex) glDeleteTextures(1, &sceneTex);
 
         if (inputTex) glDeleteTextures(1, &inputTex);
+        if (inputAlphaTex) glDeleteTextures(1, &inputAlphaTex);
         if (blackTex) glDeleteTextures(1, &blackTex);
 
         for (int i = 0; i < 4; ++i) {
@@ -575,15 +924,14 @@ void ShaderInstance::destroy() {
     sceneFbo = 0;
     sceneTex = 0;
     inputTex = 0;
+    inputAlphaTex = 0;
     blackTex = 0;
     sharedVS = 0;
 }
 
 void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double time) {
-   if (!platformMakeCurrent(pg)) return;
+    if (!platformMakeCurrent(pg)) return;
 
-    // Render Width  -> horizontal (X) resolution.
-    // Render Height -> vertical   (Y) resolution.
     unsigned int rw = (projectWidthOverride  > 0) ? (unsigned int)projectWidthOverride  : width;
     unsigned int rh = (projectHeightOverride > 0) ? (unsigned int)projectHeightOverride : height;
     if (rw < 1) rw = 1;
@@ -597,12 +945,18 @@ void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double 
     time_t mod = 0;
     if (!scriptPath.empty() && stat(scriptPath.c_str(), &st) == 0) mod = st.st_mtime;
 
-    if (mod != lastFileModTime) {
+    // Reload when the path itself changes, or the file's content changes.
+    // mtime alone is not enough: different files can share an mtime, and
+    // path switches must take effect even when mtimes collide.
+    if (scriptPath != lastLoadedPath || mod != lastFileModTime) {
+        lastLoadedPath = scriptPath;
         lastLoadedContent = scriptPath.empty() ? "" : loadFile(scriptPath);
         lastFileModTime = mod;
     }
 
-    std::string activeSource = lastLoadedContent;
+    // Compare against the loaded source without copying it (shader sources
+    // can be hundreds of KB; a copy per frame is pure waste).
+    const std::string& activeSource = lastLoadedContent;
     if (activeSource != passMain.compiledSource || !passMain.hasCompiledOnce) {
         passMain.compiledSource = activeSource;
         passMain.hasCompiledOnce = true;
@@ -617,7 +971,10 @@ void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double 
 
     ensureSceneTargets(rw, rh);
 
-    for (int i = 0; i < 4; ++i) updateFileSlot(i, rw, rh);
+    for (int i = 0; i < 4; ++i) updateFileSlot(i, rw, rh, iTime);
+
+    // Slot textures for non-shader modes (image/video) are managed inside
+    // updateFileSlot; nothing extra needed here.
 
     float mouseXPx = (float)(mouseX * (double)rw);
     float mouseYPx = (float)(mouseY * (double)rh);
@@ -630,10 +987,27 @@ void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double 
     }
 
     if (inframe) {
-        std::vector<uint32_t> tmp(inframe, inframe + (size_t)width * height);
-        if (!flipVideoY) flipRowsRGBA(tmp.data(), width, height);
+        // Reused scratch buffer: copied, flipped, and uploaded every frame
+        // without reallocating.
+        scratchInput.assign(inframe, inframe + (size_t)width * height);
+        if (!flipVideoY) flipRowsRGBA(scratchInput.data(), width, height);
         glBindTexture(GL_TEXTURE_2D, inputTex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, tmp.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, scratchInput.data());
+
+        bool needAlphaMask = false;
+        for (int i = 0; i < 4; ++i) {
+            if (iChannelSelect[i] == 6) { needAlphaMask = true; break; }
+        }
+        if (needAlphaMask) {
+            size_t npix = (size_t)width * height;
+            scratchAlpha.resize(npix);
+            for (size_t i = 0; i < npix; ++i) {
+                uint32_t a = (scratchInput[i] >> 24) & 0xFFu;
+                scratchAlpha[i] = a | (a << 8) | (a << 16) | 0xFF000000u;
+            }
+            glBindTexture(GL_TEXTURE_2D, inputAlphaTex);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, scratchAlpha.data());
+        }
     }
 
     gl::glBindFramebuffer(GL_FRAMEBUFFER, sceneFbo);
@@ -681,6 +1055,10 @@ void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double 
             case 3: useFileSlot(1, tex, &res[i*3]); break;
             case 4: useFileSlot(2, tex, &res[i*3]); break;
             case 5: useFileSlot(3, tex, &res[i*3]); break;
+            case 6:
+                tex = inputAlphaTex;
+                res[i*3+0] = (float)width; res[i*3+1] = (float)height; res[i*3+2] = 1.0f;
+                break;
             default: tex = blackTex; break;
         }
         bindChannel(passMain, i, tex);
@@ -692,7 +1070,6 @@ void ShaderInstance::render(const uint32_t* inframe, uint32_t* outframe, double 
     gl::glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    // Scale the render-resolution scene down/up to the host frame size.
     gl::glBindFramebuffer(GL_READ_FRAMEBUFFER, sceneFbo);
     gl::glBindFramebuffer(GL_DRAW_FRAMEBUFFER, outFbo);
     gl::glBlitFramebuffer(
@@ -784,6 +1161,7 @@ void f0r_set_param_value(f0r_instance_t instance, f0r_param_t param, int idx) {
         case 0: {
             inst->scriptPath = cleanPath(*(const char**)param);
             if (inst->scriptPath.empty()) {
+                inst->lastLoadedPath.clear();
                 inst->lastLoadedContent.clear();
                 inst->lastFileModTime = 0;
                 inst->passMain.compiledSource.clear();
