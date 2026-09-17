@@ -108,6 +108,21 @@ struct FrameSideData {
     uint8_t* data;              // 8  (int32_t[9] display matrix when type == 6)
 };
 
+// Layout checks: expected offsets depend on pointer size (8 bytes on
+// 64-bit, 4 on 32-bit). Members are always read by name, so the structs
+// are correct on both; these asserts only guard against field mistakes.
+#if UINTPTR_MAX == 0xFFFFFFFFu
+// 32-bit (e.g. MinGW-w64 i686): int64_t stays 8-aligned, as in the FFmpeg DLLs.
+static_assert(alignof(int64_t) == 8, "32-bit ABI with 4-aligned int64: update offsets below");
+static_assert(offsetof(FmtCtx, streams) == 28,    "AVFormatContext layout mismatch");
+static_assert(offsetof(Stream, time_base) == 20,  "AVStream layout mismatch");
+static_assert(offsetof(Stream, duration) == 40,   "AVStream layout mismatch");
+static_assert(offsetof(CodecPar, codec_id) == 4,  "AVCodecParameters layout mismatch");
+static_assert(offsetof(Packet, stream_index) == 32, "AVPacket layout mismatch");
+static_assert(offsetof(Frame, width) == 68,       "AVFrame layout mismatch");
+static_assert(offsetof(Frame, pts) == 104,        "AVFrame layout mismatch");
+static_assert(offsetof(FrameSideData, data) == 4, "AVFrameSideData layout mismatch");
+#else
 static_assert(offsetof(FmtCtx, streams) == 48,    "AVFormatContext layout mismatch");
 static_assert(offsetof(Stream, time_base) == 32,  "AVStream layout mismatch");
 static_assert(offsetof(Stream, duration) == 48,   "AVStream layout mismatch");
@@ -116,6 +131,7 @@ static_assert(offsetof(Packet, stream_index) == 36, "AVPacket layout mismatch");
 static_assert(offsetof(Frame, width) == 104,      "AVFrame layout mismatch");
 static_assert(offsetof(Frame, pts) == 136,        "AVFrame layout mismatch");
 static_assert(offsetof(FrameSideData, data) == 8, "AVFrameSideData layout mismatch");
+#endif
 
 struct Api {
     bool ok = false;
