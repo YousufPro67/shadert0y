@@ -278,7 +278,7 @@ jobs:
         run: |
           command -v i686-w64-mingw32-gcc && command -v i686-w64-mingw32-g++
           mkdir -p build-windows/x86
-          cmake -S . -B build-windows/x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++
+          cmake -S . -B build-windows/x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++
           cmake --build build-windows/x86 --parallel
 
       - name: Copy XML + build NSIS installer (README final steps)
@@ -287,7 +287,7 @@ jobs:
           cp shadert0y.xml build-windows/shadert0y.xml
           ls -lh build-windows/x64/shadert0y.dll build-windows/x86/shadert0y.dll build-windows/shadert0y.xml
           cd build-windows
-          /mingw64/bin/makensis "/DVERSION=${VERSION}" shadert0y.nsi
+          MSYS2_ARG_CONV_EXCL='/DVERSION=' /mingw64/bin/makensis "/DVERSION=${VERSION}" shadert0y.nsi
           ls -lh ./*.exe
 
       - name: Create portable zips + collect assets
