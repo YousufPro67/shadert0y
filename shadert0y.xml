@@ -1,4 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0"?>
+<!DOCTYPE kpartgui>
 <effect id="frei0r.shadert0y" service="frei0r.shadert0y" tag="frei0r.shadert0y">
     <name>Shadert0y</name>
     <description>Runs a Shadertoy-style GLSL script offscreen via OpenGL, with file slots, custom iParams, and alpha control.</description>
